@@ -3,11 +3,12 @@ extern crate log;
 extern crate mysql;
 extern crate rand;
 
+use edna::helpers::Connection;
 use edna::{helpers, EdnaClient, TableInfo};
 use log::{info, warn};
-use mysql::from_value;
 use mysql::prelude::*;
 use mysql::Opts;
+use mysql::{from_value, OptsBuilder};
 use serde_json;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -46,6 +47,10 @@ pub struct Cli {
     mysql_pass: String,
     #[structopt(long = "dryrun")]
     dryrun: bool,
+    #[structopt(long, required_unless = "socket")]
+    port: Option<usize>,
+    #[structopt(long, required_unless = "port")]
+    socket: Option<String>,
 }
 
 fn init_logger() {
@@ -115,40 +120,90 @@ fn run_edna(args: &Cli) {
     let mut restore_durations_preanon = vec![];
 
     let nusers = args.nusers_nonpc + args.nusers_pc;
-    let host = "127.0.0.1:3306";
+
+    let connection = args
+        .port
+        .map(Connection::Port)
+        .or_else(|| {
+            args.socket
+                .as_ref()
+                .map(|socket| Connection::Socket(socket.clone()))
+        })
+        .expect("invalid connection (must be port or socket");
 
     if args.prime {
         info!("Initializing DB");
-        helpers::init_db(
-            false,
-            &args.mysql_user,
-            &args.mysql_pass,
-            host,
-            DBNAME,
-            SCHEMA,
-        );
+        match &connection {
+            Connection::Port(port) => {
+                let host = format!("127.0.0.1:{}", port);
+                helpers::init_db(
+                    false,
+                    &args.mysql_user,
+                    &args.mysql_pass,
+                    &host,
+                    DBNAME,
+                    SCHEMA,
+                );
+            }
+            Connection::Socket(socket) => {
+                helpers::init_db_with_socket(
+                    false,
+                    &args.mysql_user,
+                    &args.mysql_pass,
+                    socket,
+                    DBNAME,
+                    SCHEMA,
+                );
+            }
+        }
     }
-    let url = format!(
-        "mysql://{}:{}@{}/{}",
-        args.mysql_user, args.mysql_pass, host, DBNAME,
-    );
 
-    let pool = mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap();
+    let pool = match &connection {
+        Connection::Port(port) => {
+            let host = format!("127.0.0.1:{}", port);
+            let url = format!(
+                "mysql://{}:{}@{}/{}",
+                args.mysql_user, args.mysql_pass, host, DBNAME,
+            );
+            mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap()
+        }
+        Connection::Socket(socket) => mysql::Pool::new(
+            OptsBuilder::new()
+                .socket(Some(socket))
+                .user(Some(&args.mysql_user))
+                .pass(Some(&args.mysql_user)),
+        )
+        .unwrap(),
+    };
+
     let mut db = pool.get_conn().unwrap();
     if args.prime {
         datagen::populate_database(&mut db, &args).unwrap();
     }
     warn!("database populated!");
 
-    let mut edna = EdnaClient::new(
-        &args.mysql_user,
-        &args.mysql_pass,
-        host,
-        DBNAME,
-        true,
-        false,
-        args.dryrun,
-    );
+    let mut edna = match &connection {
+        Connection::Port(port) => {
+            let host = format!("127.0.0.1:{}", port);
+            EdnaClient::new(
+                &args.mysql_user,
+                &args.mysql_pass,
+                &host,
+                DBNAME,
+                true,
+                false,
+                args.dryrun,
+            )
+        }
+        Connection::Socket(socket) => EdnaClient::with_socket(
+            &args.mysql_user,
+            &args.mysql_pass,
+            socket,
+            DBNAME,
+            true,
+            args.dryrun,
+        ),
+    };
 
     get_stats(&mut db);
 
@@ -161,7 +216,7 @@ fn run_edna(args: &Cli) {
 
     let mut user2rid = HashMap::new();
     // edit/delete/restore for pc members
-    for u in args.nusers_nonpc + 2.. args.nusers_nonpc + args.nusers_pc {
+    for u in args.nusers_nonpc + 2..args.nusers_nonpc + args.nusers_pc {
         // edit
         let start = time::Instant::now();
         let rids = datagen::reviews::get_reviews(u as u64, &mut db).unwrap();
@@ -237,22 +292,61 @@ fn run_baseline(args: &Cli) {
     let mut read_durations = vec![];
 
     let nusers = args.nusers_nonpc + args.nusers_pc;
-    let host = "127.0.0.1:3306";
+
+    let connection = args
+        .port
+        .map(Connection::Port)
+        .or_else(|| {
+            args.socket
+                .as_ref()
+                .map(|socket| Connection::Socket(socket.clone()))
+        })
+        .expect("invalid connection (must be port or socket");
+
     if args.prime {
-        helpers::init_db(
-            false,
-            &args.mysql_user,
-            &args.mysql_pass,
-            host,
-            DBNAME,
-            SCHEMA,
-        );
+        match &connection {
+            Connection::Port(port) => {
+                let host = format!("127.0.0.1:{}", port);
+                helpers::init_db(
+                    false,
+                    &args.mysql_user,
+                    &args.mysql_pass,
+                    &host,
+                    DBNAME,
+                    SCHEMA,
+                );
+            }
+            Connection::Socket(socket) => {
+                helpers::init_db_with_socket(
+                    false,
+                    &args.mysql_user,
+                    &args.mysql_pass,
+                    socket,
+                    DBNAME,
+                    SCHEMA,
+                );
+            }
+        }
     }
-    let url = format!(
-        "mysql://{}:{}@{}/{}",
-        args.mysql_user, args.mysql_pass, host, DBNAME,
-    );
-    let pool = mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap();
+
+    let pool = match &connection {
+        Connection::Port(port) => {
+            let host = format!("127.0.0.1:{}", port);
+            let url = format!(
+                "mysql://{}:{}@{}/{}",
+                args.mysql_user, args.mysql_pass, host, DBNAME,
+            );
+            mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap()
+        }
+        Connection::Socket(socket) => mysql::Pool::new(
+            OptsBuilder::new()
+                .socket(Some(socket))
+                .user(Some(&args.mysql_user))
+                .pass(Some(&args.mysql_user)),
+        )
+        .unwrap(),
+    };
+
     let mut db = pool.get_conn().unwrap();
     let mut db1 = pool.get_conn().unwrap();
     if args.prime {
@@ -297,22 +391,24 @@ fn run_baseline(args: &Cli) {
             u
         ))
         .unwrap();
-        db.query_drop(&format!(
-            "DELETE FROM ReviewRating WHERE contactId = {}",
-            u
-        ))
-        .unwrap();
+        db.query_drop(&format!("DELETE FROM ReviewRating WHERE contactId = {}", u))
+            .unwrap();
 
         let mut count = 0;
 
         // decorrelate papers
-        let res = db.query_iter(&format!("SELECT paperId FROM Paper WHERE leadContactId = {}", u)).unwrap();
+        let res = db
+            .query_iter(&format!(
+                "SELECT paperId FROM Paper WHERE leadContactId = {}",
+                u
+            ))
+            .unwrap();
         for row in res {
             count += 1;
             let pid: u64 = from_value(row.unwrap().unwrap()[0].clone());
             db1.query_drop(&format!(
                 "UPDATE Paper SET leadContactId = {} WHERE PaperId = {}",
-                u + nusers ,
+                u + nusers,
                 pid
             ))
             .unwrap();
@@ -321,13 +417,18 @@ fn run_baseline(args: &Cli) {
         count = 0;
 
         // decorrelate papers
-        let res = db.query_iter(&format!("SELECT paperId FROM Paper WHERE shepherdContactId = {}", u)).unwrap();
+        let res = db
+            .query_iter(&format!(
+                "SELECT paperId FROM Paper WHERE shepherdContactId = {}",
+                u
+            ))
+            .unwrap();
         for row in res {
             count += 1;
             let pid: u64 = from_value(row.unwrap().unwrap()[0].clone());
             db1.query_drop(&format!(
                 "UPDATE Paper SET shepherdContactId = {} WHERE PaperId = {}",
-                u + nusers ,
+                u + nusers,
                 pid
             ))
             .unwrap();
@@ -336,13 +437,18 @@ fn run_baseline(args: &Cli) {
         count = 0;
 
         // decorrelate papers
-        let res = db.query_iter(&format!("SELECT paperId FROM Paper WHERE managerContactId = {}", u)).unwrap();
+        let res = db
+            .query_iter(&format!(
+                "SELECT paperId FROM Paper WHERE managerContactId = {}",
+                u
+            ))
+            .unwrap();
         for row in res {
             count += 1;
             let pid: u64 = from_value(row.unwrap().unwrap()[0].clone());
             db1.query_drop(&format!(
                 "UPDATE Paper SET managerContactId = {} WHERE PaperId = {}",
-                u + nusers ,
+                u + nusers,
                 pid
             ))
             .unwrap();
@@ -362,73 +468,8 @@ fn run_baseline(args: &Cli) {
             let rid: u64 = from_value(row.unwrap().unwrap()[0].clone());
             db1.query_drop(&format!(
                 "UPDATE PaperReview SET contactId = {} WHERE ReviewId = {}",
-                u + nusers ,
+                u + nusers,
                 rid
-            ))
-            .unwrap();
-        }
-        datagen::insert_users_anon(count, &mut db1).unwrap();
-        count = 0;
-
-        // decorrelate comments
-        let res = db
-            .query_iter(&format!(
-                "SELECT commentId FROM PaperComment WHERE contactId = {}",
-                u
-            ))
-            .unwrap();
-        for row in res {
-            count += 1;
-            let rid: u64 = from_value(row.unwrap().unwrap()[0].clone());
-            db1.query_drop(&format!(
-                "UPDATE PaperComment SET contactId = {} WHERE commentId = {}",
-                u + nusers ,
-                rid
-            ))
-            .unwrap();
-        }
-        datagen::insert_users_anon(count, &mut db1).unwrap();
-        count = 0;
-
-
-        // decorrelate paper review requested
-        let res = db
-            .query_iter(&format!(
-                "SELECT paperId, email FROM PaperReviewRefused WHERE requestedBy = {}",
-                u
-            ))
-            .unwrap();
-        for row in res {
-            count += 1;
-            let vals = row.unwrap().unwrap();
-            let pid: u64 = from_value(vals[0].clone());
-            let email: String = from_value(vals[1].clone());
-            db1.query_drop(&format!(
-                "UPDATE PaperReviewRefused SET requestedBy = {} WHERE paperId= {} and contactId = {}",
-                u + nusers ,
-                pid,email 
-            ))
-            .unwrap();
-        }
-        datagen::insert_users_anon(count, &mut db1).unwrap();
-        count = 0;
-
-        // decorrelate paper review refused
-        let res = db
-            .query_iter(&format!(
-                "SELECT paperId, email FROM PaperReviewRefused WHERE refusedBy = {}",
-                u
-            ))
-            .unwrap();
-        for row in res {
-            count += 1;
-            let vals = row.unwrap().unwrap();
-            let pid: u64 = from_value(vals[0].clone());
-            let email: String = from_value(vals[1].clone());
-            db1.query_drop(&format!(
-                "UPDATE PaperReviewRefused SET refusedBy = {} WHERE paperId= {} and contactId = {}",
-                u + nusers ,
-                pid,email 
             ))
             .unwrap();
         }
@@ -454,16 +495,83 @@ fn run_baseline(args: &Cli) {
         }
         datagen::insert_users_anon(count, &mut db1).unwrap();
         count = 0;
-    
+
+        // decorrelate paper review requested
+        let res = db
+            .query_iter(&format!(
+                "SELECT paperId, email FROM PaperReviewRefused WHERE requestedBy = {}",
+                u
+            ))
+            .unwrap();
+        for row in res {
+            count += 1;
+            let vals = row.unwrap().unwrap();
+            let pid: u64 = from_value(vals[0].clone());
+            let email: String = from_value(vals[1].clone());
+            db1.query_drop(&format!(
+                "UPDATE PaperReviewRefused SET requestedBy = {} WHERE paperId= {} and contactId = {}",
+                u + nusers ,
+                pid,email
+            ))
+            .unwrap();
+        }
+        datagen::insert_users_anon(count, &mut db1).unwrap();
+        count = 0;
+
+        // decorrelate paper review refused
+        let res = db
+            .query_iter(&format!(
+                "SELECT paperId, email FROM PaperReviewRefused WHERE refusedBy = {}",
+                u
+            ))
+            .unwrap();
+        for row in res {
+            count += 1;
+            let vals = row.unwrap().unwrap();
+            let pid: u64 = from_value(vals[0].clone());
+            let email: String = from_value(vals[1].clone());
+            db1.query_drop(&format!(
+                "UPDATE PaperReviewRefused SET refusedBy = {} WHERE paperId= {} and contactId = {}",
+                u + nusers,
+                pid,
+                email
+            ))
+            .unwrap();
+        }
+        datagen::insert_users_anon(count, &mut db1).unwrap();
+        count = 0;
+
+        // decorrelate comments
+        let res = db
+            .query_iter(&format!(
+                "SELECT commentId FROM PaperComment WHERE contactId = {}",
+                u
+            ))
+            .unwrap();
+        for row in res {
+            count += 1;
+            let rid: u64 = from_value(row.unwrap().unwrap()[0].clone());
+            db1.query_drop(&format!(
+                "UPDATE PaperComment SET contactId = {} WHERE commentId = {}",
+                u + nusers,
+                rid
+            ))
+            .unwrap();
+        }
+        datagen::insert_users_anon(count, &mut db1).unwrap();
+        count = 0;
+
         // decorrelate action log
-        let res = db.query_iter(&format!("SELECT * FROM ActionLog WHERE contactId = {}", u)).unwrap();
+        let res = db
+            .query_iter(&format!("SELECT * FROM ActionLog WHERE contactId = {}", u))
+            .unwrap();
         for row in res {
             count += 1;
             let aid: u64 = from_value(row.unwrap().unwrap()[0].clone());
             db1.query_drop(&format!(
                 "UPDATE ActionLog SET contactId = {} WHERE logId = {}",
-                u + nusers ,
-               aid 
+                u + nusers,
+                aid
             ))
             .unwrap();
         }
@@ -471,14 +579,19 @@ fn run_baseline(args: &Cli) {
         count = 0;
 
         // decorrelate action log
-        let res = db.query_iter(&format!("SELECT * FROM ActionLog WHERE destContactId = {}", u)).unwrap();
+        let res = db
+            .query_iter(&format!(
+                "SELECT * FROM ActionLog WHERE destContactId = {}",
+                u
+            ))
+            .unwrap();
         for row in res {
             count += 1;
             let aid: u64 = from_value(row.unwrap().unwrap()[0].clone());
             db1.query_drop(&format!(
                 "UPDATE ActionLog SET destContactId = {} WHERE logId = {}",
-                u + nusers ,
-                aid 
+                u + nusers,
+                aid
             ))
             .unwrap();
         }
@@ -486,14 +599,19 @@ fn run_baseline(args: &Cli) {
         count = 0;
 
         // decorrelate action log
-        let res = db.query_iter(&format!("SELECT * FROM ActionLog WHERE trueContactId = {}", u)).unwrap();
+        let res = db
+            .query_iter(&format!(
+                "SELECT * FROM ActionLog WHERE trueContactId = {}",
+                u
+            ))
+            .unwrap();
         for row in res {
             count += 1;
             let aid: u64 = from_value(row.unwrap().unwrap()[0].clone());
             db1.query_drop(&format!(
                 "UPDATE ActionLog SET trueContactId = {} WHERE logId = {}",
-                u + nusers ,
-               aid 
+                u + nusers,
+                aid
             ))
             .unwrap();
         }
@@ -509,9 +627,7 @@ fn run_baseline(args: &Cli) {
     .unwrap();
 
     // decorrelate paper watches
-    let res = db
-        .query_iter(&format!("SELECT * FROM PaperWatch"))
-        .unwrap();
+    let res = db.query_iter(&format!("SELECT * FROM PaperWatch")).unwrap();
 
     // simulate updates, count number of rows
     let mut count = 0;
@@ -519,8 +635,7 @@ fn run_baseline(args: &Cli) {
         let pid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE PaperWatch SET contactId = {} WHERE paperWatchId = {}",
-            nusers,
-            pid 
+            nusers, pid
         ))
         .unwrap();
         count += 1;
@@ -530,17 +645,14 @@ fn run_baseline(args: &Cli) {
 
     // decorrelate paper review pref
     let res = db
-        .query_iter(&format!(
-            "SELECT * FROM PaperReviewPreference" 
-        ))
+        .query_iter(&format!("SELECT * FROM PaperReviewPreference"))
         .unwrap();
     for row in res {
         let prp: u64 = from_value(row.unwrap().unwrap()[0].clone());
         count += 1;
         db1.query_drop(&format!(
             "UPDATE PaperReviewPreference SET contactId = {} WHERE paperRevPrefId= {}",
-            nusers ,
-            prp 
+            nusers, prp
         ))
         .unwrap();
     }
@@ -548,29 +660,31 @@ fn run_baseline(args: &Cli) {
     count = 0;
 
     // decorrelate papersConflicts
-    let res = db.query_iter(&format!("SELECT paperConflictId FROM PaperConflict")).unwrap();
+    let res = db
+        .query_iter(&format!("SELECT paperConflictId FROM PaperConflict"))
+        .unwrap();
     for row in res {
         count += 1;
         let pid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE PaperConflict SET contactId = {} WHERE paperConflictId = {}",
-            nusers,
-            pid
+            nusers, pid
         ))
         .unwrap();
     }
     datagen::insert_users_anon(count, &mut db1).unwrap();
     count = 0;
 
-    // decorrelate topicinterests 
-    let res = db.query_iter(&format!("SELECT topicInterestId FROM TopicInterest")).unwrap();
+    // decorrelate topicinterests
+    let res = db
+        .query_iter(&format!("SELECT topicInterestId FROM TopicInterest"))
+        .unwrap();
     for row in res {
         count += 1;
         let pid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE TopicInterest SET contactId = {} WHERE topicInterestId = {}",
-            nusers,
-            pid
+            nusers, pid
         ))
         .unwrap();
     }
@@ -578,26 +692,25 @@ fn run_baseline(args: &Cli) {
     count = 0;
 
     // decorrelate papers
-    let res = db.query_iter(&format!("SELECT paperId FROM Paper")).unwrap();
+    let res = db
+        .query_iter(&format!("SELECT paperId FROM Paper"))
+        .unwrap();
     for row in res {
         count += 1;
         let pid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE Paper SET leadContactId = {} WHERE PaperId = {}",
-            nusers,
-            pid
+            nusers, pid
         ))
         .unwrap();
         db1.query_drop(&format!(
             "UPDATE Paper SET shepherdContactId = {} WHERE PaperId = {}",
-            nusers,
-            pid
+            nusers, pid
         ))
         .unwrap();
         db1.query_drop(&format!(
             "UPDATE Paper SET managerContactId = {} WHERE PaperId = {}",
-            nusers,
-            pid
+            nusers, pid
         ))
         .unwrap();
     }
@@ -606,17 +719,14 @@ fn run_baseline(args: &Cli) {
 
     // decorrelate reviews
     let res = db
-        .query_iter(&format!(
-            "SELECT reviewId FROM PaperReview",
-        ))
+        .query_iter(&format!("SELECT reviewId FROM PaperReview",))
         .unwrap();
     for row in res {
         count += 1;
         let rid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE PaperReview SET contactId = {} WHERE ReviewId = {}",
-            nusers,
-            rid
+            nusers, rid
         ))
         .unwrap();
     }
@@ -625,17 +735,14 @@ fn run_baseline(args: &Cli) {
 
     // decorrelate comments
     let res = db
-        .query_iter(&format!(
-            "SELECT commentId FROM PaperComment",
-        ))
+        .query_iter(&format!("SELECT commentId FROM PaperComment",))
         .unwrap();
     for row in res {
         count += 1;
         let rid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE PaperComment SET contactId = {} WHERE commentId = {}",
-            nusers,
-            rid
+            nusers, rid
         ))
         .unwrap();
     }
@@ -644,9 +751,7 @@ fn run_baseline(args: &Cli) {
 
     // decorrelate paper review requested
     let res = db
-        .query_iter(&format!(
-            "SELECT paperId, email FROM PaperReviewRefused",
-        ))
+        .query_iter(&format!("SELECT paperId, email FROM PaperReviewRefused",))
         .unwrap();
     for row in res {
         count += 1;
@@ -655,14 +760,12 @@ fn run_baseline(args: &Cli) {
         let email: String = from_value(vals[1].clone());
         db1.query_drop(&format!(
             "UPDATE PaperReviewRefused SET requestedBy = {} WHERE paperId= {} and contactId = {}",
-            nusers,
-            pid,email 
+            nusers, pid, email
         ))
         .unwrap();
         db1.query_drop(&format!(
             "UPDATE PaperReviewRefused SET refusedBy = {} WHERE paperId= {} and contactId = {}",
-            nusers,
-            pid,email 
+            nusers, pid, email
         ))
         .unwrap();
     }
@@ -671,17 +774,14 @@ fn run_baseline(args: &Cli) {
 
     // decorrelate comments
     let res = db
-        .query_iter(&format!(
-            "SELECT commentId FROM PaperComment",
-        ))
+        .query_iter(&format!("SELECT commentId FROM PaperComment",))
         .unwrap();
     for row in res {
         count += 1;
         let rid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE PaperComment SET contactId = {} WHERE commentId = {}",
-            nusers,
-            rid
+            nusers, rid
         ))
         .unwrap();
     }
@@ -690,17 +790,14 @@ fn run_baseline(args: &Cli) {
 
     // decorrelate review rating
     let res = db
-        .query_iter(&format!(
-            "SELECT * FROM ReviewRating",
-        ))
+        .query_iter(&format!("SELECT * FROM ReviewRating",))
         .unwrap();
     for row in res {
         count += 1;
         let rid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE ReviewRating SET contactId = {} WHERE ratingId = {}",
-            nusers,
-            rid 
+            nusers, rid
         ))
         .unwrap();
     }
@@ -714,14 +811,12 @@ fn run_baseline(args: &Cli) {
         let aid: u64 = from_value(row.unwrap().unwrap()[0].clone());
         db1.query_drop(&format!(
             "UPDATE ActionLog SET contactId = {} WHERE logId = {}",
-            nusers,
-           aid 
+            nusers, aid
         ))
         .unwrap();
         db1.query_drop(&format!(
             "UPDATE ActionLog SET trueContactId = {} WHERE logId = {}",
-            nusers,
-           aid 
+            nusers, aid
         ))
         .unwrap();
     }
@@ -769,7 +864,10 @@ fn print_stats(
             nusers
         )
     } else {
-        format!("../../results/hotcrp_results/hotcrp_disguise_stats_{}users.csv", nusers)
+        format!(
+            "../../results/hotcrp_results/hotcrp_disguise_stats_{}users.csv",
+            nusers
+        )
     };
     // print out stats
     let mut f = OpenOptions::new()
