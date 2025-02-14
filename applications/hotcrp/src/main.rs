@@ -171,7 +171,8 @@ fn run_edna(args: &Cli) {
             OptsBuilder::new()
                 .socket(Some(socket))
                 .user(Some(&args.mysql_user))
-                .pass(Some(&args.mysql_user)),
+                .pass(Some(&args.mysql_user))
+                .db_name(Some(DBNAME)),
         )
         .unwrap(),
     };
@@ -342,7 +343,8 @@ fn run_baseline(args: &Cli) {
             OptsBuilder::new()
                 .socket(Some(socket))
                 .user(Some(&args.mysql_user))
-                .pass(Some(&args.mysql_user)),
+                .pass(Some(&args.mysql_user))
+                .db_name(Some(DBNAME)),
         )
         .unwrap(),
     };
