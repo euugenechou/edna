@@ -5,9 +5,11 @@ extern crate rand;
 
 use chrono::Local;
 use edna::*;
+use helpers::Connection;
 use log::{error, warn};
 use mysql::prelude::*;
 use mysql::Opts;
+use mysql::OptsBuilder;
 use rand::Rng;
 use std::cmp::min;
 use std::collections::HashMap;
@@ -29,6 +31,7 @@ mod updates_bench;
 include!("statistics.rs");
 
 const TOTAL_TIME: u128 = 500000;
+const DB_NAME: &'static str = "lobsters_edna";
 const SCHEMA: &'static str = include_str!("../schema.sql");
 const TABLEINFO_JSON: &'static str = include_str!("./disguises/table_info.json");
 const PPGEN_JSON: &'static str = include_str!("./disguises/pp_gen.json");
@@ -56,6 +59,10 @@ struct Cli {
     dryrun: bool,
     #[structopt(long = "uid", default_value = "1")]
     uid: usize,
+    #[structopt(long, required_unless = "socket")]
+    port: Option<usize>,
+    #[structopt(long, required_unless = "port")]
+    socket: Option<String>,
 }
 
 fn init_logger() {
@@ -77,17 +84,57 @@ fn main() {
     let sampler = datagen::Sampler::new(scale);
     let nusers = sampler.nusers();
 
-    let dbname: String = "lobsters_edna".to_string();
-    let host = "127.0.0.1:3306";
-    let url = format!("mysql://{}:{}@{}/{}", "tester", "pass", host, dbname);
-    let pool = mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap();
+    let connection = args
+        .port
+        .map(Connection::Port)
+        .or_else(|| {
+            args.socket
+                .as_ref()
+                .map(|socket| Connection::Socket(socket.clone()))
+        })
+        .expect("invalid connection (must be port or socket");
+
+    let pool = match &connection {
+        Connection::Port(port) => {
+            let host = format!("127.0.0.1:{}", port);
+            let url = format!("mysql://{}:{}@{}/{}", "tester", "pass", host, DB_NAME);
+            mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap()
+        }
+        Connection::Socket(socket) => mysql::Pool::new(
+            OptsBuilder::new()
+                .socket(Some(socket))
+                .user(Some("tester"))
+                .pass(Some("pass"))
+                .db_name(Some(DB_NAME)),
+        )
+        .unwrap(),
+    };
+
     let mut db = pool.get_conn().unwrap();
 
     if prime {
-        helpers::init_db(false, "tester", "pass", host, &dbname, SCHEMA);
+        match &connection {
+            Connection::Port(port) => {
+                let host = format!("127.0.0.1:{}", port);
+                helpers::init_db(false, "tester", "pass", &host, DB_NAME, SCHEMA);
+            }
+            Connection::Socket(socket) => {
+                helpers::init_db_with_socket(false, "tester", "pass", socket, DB_NAME, SCHEMA);
+            }
+        }
+
         datagen::gen_data(&sampler, &mut db);
     }
-    let mut edna = EdnaClient::new("tester", "pass", host, &dbname, false, false, args.dryrun);
+
+    let mut edna = match &connection {
+        Connection::Port(port) => {
+            let host = format!("127.0.0.1:{}", port);
+            EdnaClient::new("tester", "pass", &host, DB_NAME, false, false, args.dryrun)
+        }
+        Connection::Socket(socket) => {
+            EdnaClient::with_socket("tester", "pass", socket, DB_NAME, false, args.dryrun)
+        }
+    };
 
     if args.prime {
         // don't run benchmarks if we're just priming
@@ -129,7 +176,7 @@ fn main() {
     match args.test.as_str() {
         "storage" => run_sizes_test(&mut edna, &sampler),
         //"stats" => run_single_edna_test(&sampler, &mut edna, &url),
-        "stats" => run_stats_test(&mut edna, &sampler, &url, args.use_txn, args.dryrun),
+        "stats" => run_stats_test(&mut edna, &sampler, &connection, args.use_txn, args.dryrun),
         _ => run_concurrent = true,
     }
     if !run_concurrent {
@@ -538,12 +585,28 @@ fn run_sizes_test(edna: &mut EdnaClient, sampler: &datagen::Sampler) {
 fn run_stats_test(
     edna: &mut EdnaClient,
     sampler: &datagen::Sampler,
-    url: &str,
+    connection: &Connection,
     use_txn: bool,
     dryrun: bool,
 ) {
     error!("Running stats test");
-    let pool = mysql::Pool::new(Opts::from_url(url).unwrap()).unwrap();
+
+    let pool = match connection {
+        Connection::Port(port) => {
+            let host = format!("127.0.0.1:{}", port);
+            let url = format!("mysql://{}:{}@{}/{}", "tester", "pass", host, DB_NAME);
+            mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap()
+        }
+        Connection::Socket(socket) => mysql::Pool::new(
+            OptsBuilder::new()
+                .socket(Some(socket))
+                .user(Some("tester"))
+                .pass(Some("pass"))
+                .db_name(Some(DB_NAME)),
+        )
+        .unwrap(),
+    };
+
     let mut db = pool.get_conn().unwrap();
 
     let start = time::Instant::now();
