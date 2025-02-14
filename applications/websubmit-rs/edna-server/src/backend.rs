@@ -1,5 +1,5 @@
 use crate::args;
-use crate::args::Connection;
+use edna::helpers::Connection;
 use edna::EdnaClient;
 use mysql::prelude::*;
 use mysql::Opts;

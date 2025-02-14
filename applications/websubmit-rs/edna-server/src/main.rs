@@ -25,9 +25,9 @@ mod login;
 mod privacy;
 mod questions;
 
-use args::Connection;
 use backend::MySqlBackend;
 use edna::helpers;
+use edna::helpers::Connection;
 use mysql::from_value;
 use mysql::prelude::*;
 use mysql::OptsBuilder;
@@ -226,7 +226,7 @@ async fn main() {
     let args = args::parse_args();
 
     if args.prime {
-        let schema = std::fs::read_to_string("src/schema.sql").unwrap();
+        let schema = std::fs::read_to_string(&args.schema).unwrap();
         match &args.connection {
             Connection::Port(port) => {
                 let host = format!("127.0.0.1:{}", port);
@@ -423,7 +423,7 @@ fn run_baseline_benchmark(args: &args::Args, rocket: Rocket<Build>) {
      ***********************************/
     // create all data again... because we just deleted them all lol
     if args.prime {
-        let schema = std::fs::read_to_string("src/schema.sql").unwrap();
+        let schema = std::fs::read_to_string(&args.schema).unwrap();
         match &args.connection {
             Connection::Port(port) => {
                 let host = format!("127.0.0.1:{}", port);

@@ -1,5 +1,6 @@
 use crate::config;
 use clap::{App, Arg};
+use edna::helpers::Connection;
 use std::str::FromStr;
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
@@ -7,12 +8,6 @@ const WEBSUBMIT_USAGE: &'static str = "\
 EXAMPLES:
   websubmit -i csci2390
   websubmit -i csci2390 -c csci2390-f19.toml";
-
-#[derive(Debug, Clone)]
-pub enum Connection {
-    Port(usize),
-    Socket(String),
-}
 
 #[derive(Clone, Debug)]
 pub struct Args {
@@ -39,7 +34,7 @@ pub fn parse_args() -> Args {
                 .long("schema")
                 .takes_value(true)
                 .value_name("SCHEMA")
-                .default_value("/edna/repo/websubmit-rs/edna-server/src/schema.sql")
+                .default_value("./applications/websubmit-rs/edna-server/src/schema.sql")
         )
         .arg(
             Arg::with_name("config")
@@ -47,7 +42,7 @@ pub fn parse_args() -> Args {
                 .long("config")
                 .takes_value(true)
                 .value_name("CONFIG_FILE")
-                .default_value("/edna/repo/applications/websubmit-rs/edna-server/sample-config.toml")
+                .default_value("./applications/websubmit-rs/edna-server/sample-config.toml")
                 .help("Path to the configuration file for the deployment."),
         )
         .arg(

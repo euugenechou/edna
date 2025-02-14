@@ -6,6 +6,7 @@ use log::{error, warn};
 use mysql::prelude::*;
 use mysql::IsolationLevel::Serializable;
 use mysql::Opts;
+use mysql::OptsBuilder;
 use mysql::TxOpts;
 use serde::{Deserialize, Serialize};
 use sql_parser::ast::*;
@@ -176,6 +177,46 @@ impl EdnaClient {
             format!("mysql://{}:{}@{}/{}", user, password, host, dbname)
         };
         let pool = mysql::Pool::new(Opts::from_url(&url).unwrap()).unwrap();
+
+        let llapi = Arc::new(Mutex::new(lowlevel_api::LowLevelAPI::new(
+            pool.clone(),
+            in_memory,
+            true, // for now, reset encdata each time
+            dryrun,
+        )));
+        EdnaClient {
+            pool: pool.clone(),
+            in_memory: in_memory,
+            disguiser: disguiser::Disguiser::new(
+                llapi.clone(),
+                pool.clone(),
+                in_memory,
+                true, // reset each time for now
+            ),
+            revealer: revealer::Revealer::new(llapi.clone(), pool.clone()),
+            llapi: llapi,
+        }
+    }
+
+    /// Same thing as `Edna::new()`, but with a socket.
+    ///
+    /// Unlike `Edna::new()`, this doesn't support a proxy.
+    pub fn with_socket(
+        user: &str,
+        password: &str,
+        socket: &str,
+        dbname: &str,
+        in_memory: bool,
+        dryrun: bool,
+    ) -> EdnaClient {
+        let pool = mysql::Pool::new(
+            OptsBuilder::new()
+                .socket(Some(socket))
+                .user(Some(user))
+                .pass(Some(password))
+                .db_name(Some(dbname)),
+        )
+        .unwrap();
 
         let llapi = Arc::new(Mutex::new(lowlevel_api::LowLevelAPI::new(
             pool.clone(),

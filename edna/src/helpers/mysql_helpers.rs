@@ -1,6 +1,6 @@
 use crate::*;
 use log::{info, warn};
-use mysql::Opts;
+use mysql::{Opts, OptsBuilder};
 use std::str::FromStr;
 
 pub const NULLSTR: &'static str = "NULL";
@@ -178,10 +178,43 @@ fn create_schema(db: &mut mysql::Conn, in_memory: bool, schema: &str) -> Result<
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+pub enum Connection {
+    Port(usize),
+    Socket(String),
+}
+
 pub fn init_db(in_memory: bool, user: &str, pass: &str, host: &str, dbname: &str, schema: &str) {
     let url = format!("mysql://{}:{}@{}", user, pass, host);
     warn!("Init db {} url {}!", dbname, url);
     let mut db = mysql::Conn::new(Opts::from_url(&url).unwrap()).unwrap();
+    warn!("Priming database");
+    db.query_drop(&format!("DROP DATABASE IF EXISTS {};", dbname))
+        .unwrap();
+    db.query_drop(&format!("CREATE DATABASE {};", dbname))
+        .unwrap();
+    assert_eq!(db.ping(), true);
+    assert_eq!(db.select_db(&format!("{}", dbname)), true);
+    create_schema(&mut db, in_memory, schema).unwrap();
+}
+
+pub fn init_db_with_socket(
+    in_memory: bool,
+    user: &str,
+    pass: &str,
+    socket: &str,
+    dbname: &str,
+    schema: &str,
+) {
+    warn!("Init db {} socket {}!", dbname, socket);
+    let mut db = mysql::Conn::new(
+        OptsBuilder::new()
+            .socket(Some(socket))
+            .user(Some(user))
+            .pass(Some(pass))
+            .db_name(Some(dbname)),
+    )
+    .unwrap();
     warn!("Priming database");
     db.query_drop(&format!("DROP DATABASE IF EXISTS {};", dbname))
         .unwrap();
