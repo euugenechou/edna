@@ -25,10 +25,12 @@ mod login;
 mod privacy;
 mod questions;
 
+use args::Connection;
 use backend::MySqlBackend;
 use edna::helpers;
 use mysql::from_value;
 use mysql::prelude::*;
+use mysql::OptsBuilder;
 use mysql::{Opts, Value};
 use rocket::fs::FileServer;
 use rocket::http::ContentType;
@@ -206,7 +208,7 @@ fn populate_db(
                     assert_eq!(response.status(), Status::SeeOther);
 
                     // insert answers
-                    db.query_drop(&format!("INSERT INTO answers VALUES ('{}@mail.edu', {}, {}, 'lec{}q{}answer{}', '1000-01-01 00:00:00');", 
+                    db.query_drop(&format!("INSERT INTO answers VALUES ('{}@mail.edu', {}, {}, 'lec{}q{}answer{}', '1000-01-01 00:00:00');",
                         u, l, q, l, q, u)).unwrap();
 
                     // logout
@@ -225,15 +227,29 @@ async fn main() {
 
     if args.prime {
         let schema = std::fs::read_to_string("src/schema.sql").unwrap();
-        let host = format!("127.0.0.1:{}", args.port);
-        helpers::init_db(
-            false, // in-memory
-            &args.config.mysql_user,
-            &args.config.mysql_pass,
-            &host,
-            &args.class,
-            &schema,
-        );
+        match &args.connection {
+            Connection::Port(port) => {
+                let host = format!("127.0.0.1:{}", port);
+                helpers::init_db(
+                    false, // in-memory
+                    &args.config.mysql_user,
+                    &args.config.mysql_pass,
+                    &host,
+                    &args.class,
+                    &schema,
+                );
+            }
+            Connection::Socket(socket) => {
+                helpers::init_db_with_socket(
+                    false, // in-memory
+                    &args.config.mysql_user,
+                    &args.config.mysql_pass,
+                    socket,
+                    &args.class,
+                    &schema,
+                );
+            }
+        }
     }
 
     // create Edna after DB?
@@ -268,13 +284,27 @@ fn run_baseline_benchmark(args: &args::Args, rocket: Rocket<Build>) {
     let mut questions_durations = vec![];
     let log = new_logger();
 
-    let url = format!(
-        "mysql://{}:{}@127.0.0.1:{}/{}",
-        args.config.mysql_user, args.config.mysql_pass, args.port, args.class
-    );
-    let client = Client::tracked(rocket).expect("valid rocket instance");
-    let mut db = mysql::Conn::new(Opts::from_url(&url).unwrap()).unwrap();
     let mut user2apikey = HashMap::new();
+    let client = Client::tracked(rocket).expect("valid rocket instance");
+
+    let mut db = match &args.connection {
+        Connection::Port(port) => {
+            let url = format!(
+                "mysql://{}:{}@127.0.0.1:{}/{}",
+                args.config.mysql_user, args.config.mysql_pass, port, args.class
+            );
+            mysql::Conn::new(Opts::from_url(&url).unwrap()).unwrap()
+        }
+        Connection::Socket(socket) => mysql::Conn::new(
+            OptsBuilder::new()
+                .socket(Some(socket))
+                .user(Some(&args.config.mysql_user))
+                .pass(Some(&args.config.mysql_pass))
+                .db_name(Some(&args.class)),
+        )
+        .unwrap(),
+    };
+
     populate_db(
         &mut user2apikey,
         &mut account_durations,
@@ -394,15 +424,29 @@ fn run_baseline_benchmark(args: &args::Args, rocket: Rocket<Build>) {
     // create all data again... because we just deleted them all lol
     if args.prime {
         let schema = std::fs::read_to_string("src/schema.sql").unwrap();
-        let host = format!("127.0.0.1:{}", args.port);
-        helpers::init_db(
-            false, // in-memory
-            &args.config.mysql_user,
-            &args.config.mysql_pass,
-            &host,
-            &args.class,
-            &schema,
-        );
+        match &args.connection {
+            Connection::Port(port) => {
+                let host = format!("127.0.0.1:{}", port);
+                helpers::init_db(
+                    false, // in-memory
+                    &args.config.mysql_user,
+                    &args.config.mysql_pass,
+                    &host,
+                    &args.class,
+                    &schema,
+                );
+            }
+            Connection::Socket(socket) => {
+                helpers::init_db_with_socket(
+                    false, // in-memory
+                    &args.config.mysql_user,
+                    &args.config.mysql_pass,
+                    socket,
+                    &args.class,
+                    &schema,
+                );
+            }
+        }
     }
     populate_db(
         &mut user2apikey,
@@ -460,13 +504,28 @@ fn run_benchmark(args: &args::Args, rocket: Rocket<Build>) {
     let mut answers_durations = vec![];
     let mut questions_durations = vec![];
 
-    let url = format!(
-        "mysql://{}:{}@127.0.0.1:{}/{}",
-        args.config.mysql_user, args.config.mysql_pass, args.port, args.class
-    );
-    let client = Client::tracked(rocket).expect("valid rocket instance");
-    let mut db = mysql::Conn::new(Opts::from_url(&url).unwrap()).unwrap();
     let mut user2apikey = HashMap::new();
+    let client = Client::tracked(rocket).expect("valid rocket instance");
+
+    let mut db = match &args.connection {
+        Connection::Port(port) => mysql::Conn::new(
+            Opts::from_url(&format!(
+                "mysql://{}:{}@127.0.0.1:{}/{}",
+                args.config.mysql_user, args.config.mysql_pass, port, args.class
+            ))
+            .unwrap(),
+        )
+        .unwrap(),
+        Connection::Socket(socket) => mysql::Conn::new(
+            OptsBuilder::new()
+                .socket(Some(socket))
+                .user(Some(&args.config.mysql_user))
+                .pass(Some(&args.config.mysql_pass))
+                .db_name(Some(&args.class)),
+        )
+        .unwrap(),
+    };
+
     let log = new_logger();
     populate_db(
         &mut user2apikey,

@@ -1,4 +1,5 @@
 use crate::args;
+use crate::args::Connection;
 use edna::EdnaClient;
 use mysql::prelude::*;
 use mysql::Opts;
@@ -11,7 +12,10 @@ pub struct MySqlBackend {
     pub log: slog::Logger,
     pub edna: EdnaClient,
     pub is_baseline: bool,
-    url: String,
+    connection: Connection,
+    user: String,
+    pass: String,
+    dbname: String,
 }
 
 impl MySqlBackend {
@@ -20,35 +24,85 @@ impl MySqlBackend {
             None => slog::Logger::root(slog::Discard, o!()),
             Some(l) => l,
         };
-        let url = format!(
-            "mysql://{}:{}@127.0.0.1:{}/{}",
-            args.config.mysql_user, args.config.mysql_pass, args.port, args.class
-        );
-        debug!(log, "Connecting to MySql DB {}...", dbname);
-        let mut db = mysql::Conn::new(Opts::from_url(&url).unwrap()).unwrap();
-        assert_eq!(db.ping(), true);
 
-        let edna = EdnaClient::new(
-            &args.config.mysql_user,
-            &args.config.mysql_pass,
-            &format!("127.0.0.1:{}", args.port),
-            &args.class,
-            true,
-            false,
-            args.dryrun,
-        );
+        debug!(log, "Connecting to MySql DB {}...", dbname);
+
+        let (db, edna) = match &args.connection {
+            Connection::Port(port) => {
+                let url = format!(
+                    "mysql://{}:{}@127.0.0.1:{}/{}",
+                    args.config.mysql_user, args.config.mysql_pass, port, args.class
+                );
+
+                let mut db = mysql::Conn::new(Opts::from_url(&url).unwrap()).unwrap();
+                assert!(db.ping());
+
+                let edna = EdnaClient::new(
+                    &args.config.mysql_user,
+                    &args.config.mysql_pass,
+                    &format!("127.0.0.1:{}", port),
+                    &args.class,
+                    true,
+                    false,
+                    args.dryrun,
+                );
+
+                (db, edna)
+            }
+            Connection::Socket(socket) => {
+                let mut db = mysql::Conn::new(
+                    OptsBuilder::new()
+                        .socket(Some(socket))
+                        .user(Some(&args.config.mysql_user))
+                        .pass(Some(&args.config.mysql_pass))
+                        .db_name(Some(&args.class)),
+                )
+                .unwrap();
+                assert!(db.ping());
+
+                let edna = EdnaClient::with_socket(
+                    &args.config.mysql_user,
+                    &args.config.mysql_pass,
+                    &socket,
+                    &args.class,
+                    true,
+                    args.dryrun,
+                );
+
+                (db, edna)
+            }
+        };
 
         Ok(MySqlBackend {
             handle: db,
-            log: log,
-            url: url.to_string(),
-            edna: edna,
+            log,
+            edna,
             is_baseline: args.is_baseline,
+            connection: args.connection.clone(),
+            user: args.config.mysql_user.clone(),
+            pass: args.config.mysql_pass.clone(),
+            dbname: args.class.clone(),
         })
     }
 
     fn reconnect(&mut self) {
-        self.handle = mysql::Conn::new(Opts::from_url(&self.url).unwrap()).unwrap();
+        self.handle = match &self.connection {
+            Connection::Port(port) => {
+                let url = format!(
+                    "mysql://{}:{}@127.0.0.1:{}/{}",
+                    self.user, self.pass, port, self.dbname,
+                );
+                mysql::Conn::new(Opts::from_url(&url).unwrap()).unwrap()
+            }
+            Connection::Socket(socket) => mysql::Conn::new(
+                OptsBuilder::new()
+                    .socket(Some(socket))
+                    .user(Some(&self.user))
+                    .pass(Some(&self.pass))
+                    .db_name(Some(&self.dbname)),
+            )
+            .unwrap(),
+        };
     }
 
     pub fn query_iter(&mut self, sql: &str) -> Vec<Vec<Value>> {

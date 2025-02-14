@@ -8,6 +8,12 @@ EXAMPLES:
   websubmit -i csci2390
   websubmit -i csci2390 -c csci2390-f19.toml";
 
+#[derive(Debug, Clone)]
+pub enum Connection {
+    Port(usize),
+    Socket(String),
+}
+
 #[derive(Clone, Debug)]
 pub struct Args {
     pub class: String,
@@ -18,7 +24,7 @@ pub struct Args {
     pub proxy: bool,
     pub dryrun: bool,
     pub is_baseline: bool,
-    pub port: usize,
+    pub connection: Connection,
     pub benchmark: bool,
     pub config: config::Config,
     pub schema: String,
@@ -33,7 +39,7 @@ pub fn parse_args() -> Args {
                 .long("schema")
                 .takes_value(true)
                 .value_name("SCHEMA")
-                .default_value("/data/repository/websubmit-rs/edna-server/src/schema.sql")
+                .default_value("/edna/repo/websubmit-rs/edna-server/src/schema.sql")
         )
         .arg(
             Arg::with_name("config")
@@ -41,7 +47,7 @@ pub fn parse_args() -> Args {
                 .long("config")
                 .takes_value(true)
                 .value_name("CONFIG_FILE")
-                .default_value("/data/repository/applications/websubmit-rs/edna-server/sample-config.toml")
+                .default_value("/edna/repo/applications/websubmit-rs/edna-server/sample-config.toml")
                 .help("Path to the configuration file for the deployment."),
         )
         .arg(
@@ -89,14 +95,19 @@ pub fn parse_args() -> Args {
                 .takes_value(true)
                 .value_name("proxy")
                 .default_value("true")
-         ).arg(
+        ).arg(
             Arg::with_name("port")
                 .short("p")
                 .long("port")
                 .takes_value(true)
                 .value_name("port")
-                .default_value("true")
-         ).arg(
+                .required_unless("socket")
+        ).arg(
+            Arg::with_name("socket")
+                .long("socket")
+                .value_name("SOCKET")
+                .takes_value(true)
+        ).arg(
             Arg::with_name("benchmark")
                 .short("b")
                 .long("benchmark")
@@ -119,8 +130,19 @@ pub fn parse_args() -> Args {
 
         .after_help(WEBSUBMIT_USAGE)
         .get_matches();
+
     let config = config::parse(args.value_of("config").expect("Failed to parse config!"))
         .expect("failed to parse config");
+
+    let connection = args
+        .value_of("port")
+        .map(|port| Connection::Port(port.parse().unwrap()))
+        .or_else(|| {
+            args.value_of("socket")
+                .map(|socket| Connection::Socket(socket.into()))
+        })
+        .expect("invalid connection (must be port or socket");
+
     Args {
         is_baseline: bool::from_str(args.value_of("baseline").unwrap()).unwrap(),
         class: String::from(args.value_of("class").unwrap()),
@@ -129,10 +151,10 @@ pub fn parse_args() -> Args {
         nqs: usize::from_str(args.value_of("nqs").unwrap()).unwrap(),
         prime: bool::from_str(args.value_of("prime").unwrap()).unwrap(),
         proxy: bool::from_str(args.value_of("proxy").unwrap()).unwrap(),
-        port: usize::from_str(args.value_of("port").unwrap()).unwrap(),
+        connection,
         benchmark: bool::from_str(args.value_of("benchmark").unwrap()).unwrap(),
         schema: String::from(args.value_of("schema").unwrap()),
         dryrun: bool::from_str(args.value_of("dryrun").unwrap()).unwrap(),
-        config: config,
+        config,
     }
 }
