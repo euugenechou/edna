@@ -343,7 +343,7 @@ fn run_baseline(args: &Cli) {
             OptsBuilder::new()
                 .socket(Some(socket))
                 .user(Some(&args.mysql_user))
-                .pass(Some(&args.mysql_user))
+                .pass(Some(&args.mysql_pass))
                 .db_name(Some(DBNAME)),
         )
         .unwrap(),
