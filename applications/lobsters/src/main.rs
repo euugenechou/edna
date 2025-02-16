@@ -94,6 +94,18 @@ fn main() {
         })
         .expect("invalid connection (must be port or socket");
 
+    if prime {
+        match &connection {
+            Connection::Port(port) => {
+                let host = format!("127.0.0.1:{}", port);
+                helpers::init_db(false, "tester", "pass", &host, DB_NAME, SCHEMA);
+            }
+            Connection::Socket(socket) => {
+                helpers::init_db_with_socket(false, "tester", "pass", socket, DB_NAME, SCHEMA);
+            }
+        }
+    }
+
     let pool = match &connection {
         Connection::Port(port) => {
             let host = format!("127.0.0.1:{}", port);
@@ -113,16 +125,6 @@ fn main() {
     let mut db = pool.get_conn().unwrap();
 
     if prime {
-        match &connection {
-            Connection::Port(port) => {
-                let host = format!("127.0.0.1:{}", port);
-                helpers::init_db(false, "tester", "pass", &host, DB_NAME, SCHEMA);
-            }
-            Connection::Socket(socket) => {
-                helpers::init_db_with_socket(false, "tester", "pass", socket, DB_NAME, SCHEMA);
-            }
-        }
-
         datagen::gen_data(&sampler, &mut db);
     }
 
@@ -136,11 +138,11 @@ fn main() {
         }
     };
 
-    if args.prime {
-        // don't run benchmarks if we're just priming
-        error!("PRIMING???");
-        return;
-    }
+    // if args.prime {
+    //     // don't run benchmarks if we're just priming
+    //     error!("PRIMING???");
+    //     return;
+    // }
 
     if args.test.contains("baseline") {
         match args.test.as_str() {
