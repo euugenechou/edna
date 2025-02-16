@@ -211,8 +211,7 @@ pub fn init_db_with_socket(
         OptsBuilder::new()
             .socket(Some(socket))
             .user(Some(user))
-            .pass(Some(pass))
-            .db_name(Some(dbname)),
+            .pass(Some(pass)),
     )
     .unwrap();
     warn!("Priming database");
