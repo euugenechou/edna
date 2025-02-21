@@ -1082,7 +1082,7 @@ fn run_baseline_decay_test(sampler: &datagen::Sampler, db: &mut mysql::PooledCon
 
 fn run_baseline_hobby_anon_test(sampler: &datagen::Sampler, db: &mut mysql::PooledConn) {
     let filename =
-        format!("../../results/lobsters_results/lobsters_disguise_stats_baseline_hobbyanon.csv");
+        format!("../../results/lobsters_results/lobsters_disguise_stats_baseline_hobby_anon.csv");
     let mut file = File::create(filename).unwrap();
 
     for u in 0..sampler.nusers() {
