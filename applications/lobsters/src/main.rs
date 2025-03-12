@@ -125,7 +125,10 @@ fn main() {
     let mut db = pool.get_conn().unwrap();
 
     if prime {
+        // don't run benchmarks if we're just priming
         datagen::gen_data(&sampler, &mut db);
+        error!("PRIMING???");
+        return;
     }
 
     let mut edna = match &connection {
@@ -137,12 +140,6 @@ fn main() {
             EdnaClient::with_socket("tester", "pass", socket, DB_NAME, false, args.dryrun)
         }
     };
-
-    // if args.prime {
-    //     // don't run benchmarks if we're just priming
-    //     error!("PRIMING???");
-    //     return;
-    // }
 
     if args.test.contains("baseline") {
         match args.test.as_str() {
