@@ -63,6 +63,8 @@ struct Cli {
     port: Option<usize>,
     #[structopt(long, required_unless = "port")]
     socket: Option<String>,
+    #[structopt(long)]
+    schema: Option<String>,
 }
 
 fn init_logger() {
@@ -83,6 +85,11 @@ fn main() {
     let prime = args.prime;
     let sampler = datagen::Sampler::new(scale);
     let nusers = sampler.nusers();
+    let schema = args
+        .schema
+        .as_ref()
+        .map(|schema| fs::read_to_string(schema).unwrap())
+        .unwrap_or_else(|| SCHEMA.to_string());
 
     let connection = args
         .port
@@ -98,10 +105,10 @@ fn main() {
         match &connection {
             Connection::Port(port) => {
                 let host = format!("127.0.0.1:{}", port);
-                helpers::init_db(false, "tester", "pass", &host, DB_NAME, SCHEMA);
+                helpers::init_db(false, "tester", "pass", &host, DB_NAME, &schema);
             }
             Connection::Socket(socket) => {
-                helpers::init_db_with_socket(false, "tester", "pass", socket, DB_NAME, SCHEMA);
+                helpers::init_db_with_socket(false, "tester", "pass", socket, DB_NAME, &schema);
             }
         }
     }

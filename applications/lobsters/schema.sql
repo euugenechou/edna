@@ -1,5 +1,3 @@
----- note: set short_id to 30 bytes so that randomly generating int values doesn't complain
-
 DROP TABLE IF EXISTS `comments` CASCADE;
 CREATE TABLE `comments` (`id` int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, `created_at` datetime NOT NULL, `updated_at` datetime, `short_id` varchar(30) DEFAULT '' NOT NULL, `story_id` int unsigned NOT NULL, `user_id` bigint NOT NULL, `parent_comment_id` int unsigned, `thread_id` int unsigned, `comment` mediumtext NOT NULL, `upvotes` int DEFAULT 0 NOT NULL, `downvotes` int DEFAULT 0 NOT NULL, `confidence` decimal(20,19) DEFAULT '0.0' NOT NULL, `markeddown_comment` mediumtext, `is_deleted` tinyint(1) DEFAULT 0, `is_moderated` tinyint(1) DEFAULT 0, `is_from_email` tinyint(1) DEFAULT 0, `hat_id` int, fulltext INDEX `index_comments_on_comment`  (`comment`),  INDEX `confidence_idx`  (`confidence`), UNIQUE INDEX `short_id`  (`short_id`),  INDEX `story_id_short_id`  (`story_id`, `short_id`),  INDEX `thread_id`  (`thread_id`),  INDEX `index_comments_on_user_id`  (`user_id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 DROP TABLE IF EXISTS `hat_requests` CASCADE;
