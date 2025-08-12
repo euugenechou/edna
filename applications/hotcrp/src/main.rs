@@ -129,7 +129,7 @@ fn run_edna(args: &Cli) {
                 .as_ref()
                 .map(|socket| Connection::Socket(socket.clone()))
         })
-        .expect("invalid connection (must be port or socket");
+        .expect("invalid connection (must be port or socket)");
 
     if args.prime {
         info!("Initializing DB");
@@ -171,7 +171,7 @@ fn run_edna(args: &Cli) {
             OptsBuilder::new()
                 .socket(Some(socket))
                 .user(Some(&args.mysql_user))
-                .pass(Some(&args.mysql_user))
+                .pass(Some(&args.mysql_pass))
                 .db_name(Some(DBNAME)),
         )
         .unwrap(),
@@ -302,7 +302,7 @@ fn run_baseline(args: &Cli) {
                 .as_ref()
                 .map(|socket| Connection::Socket(socket.clone()))
         })
-        .expect("invalid connection (must be port or socket");
+        .expect("invalid connection (must be port or socket)");
 
     if args.prime {
         match &connection {
